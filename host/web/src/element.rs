@@ -742,6 +742,7 @@ pub fn props_of(node: &NodeFacts<'_>) -> SortedMap<String, String> {
             PropId::SwipeIndicator => "swipeIndicator",
             PropId::Href if text.is_empty() => continue,
             PropId::Href => "href",
+            PropId::Target => "target",
             PropId::Disabled => "disabled",
             PropId::Min => "min",
             PropId::Max => "max",
