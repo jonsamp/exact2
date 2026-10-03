@@ -438,6 +438,12 @@ final class Presenter {
         }
     }
 
+    /// Ends editing in the viewport and in the navigation stage beside it.
+    @discardableResult func endEditing() -> Bool {
+        let inViewport = viewport.endEditing(true)
+        return navigation.stage.endEditing(true) || inViewport
+    }
+
     /// The action's blur(): drop focus and the keyboard, and any focus still
     /// waiting to be delivered; blur(html-id) only when that node holds it.
     func blurElement(_ args: [Any]) {
@@ -449,7 +455,7 @@ final class Presenter {
             return
         }
         // `endEditing` resigns text editors only; a focused control resigns itself.
-        if !viewport.endEditing(true), let held = views.values.first(where: { $0.isFirstResponder }) { _ = held.resignFirstResponder() }
+        if !endEditing(), let held = views.values.first(where: { $0.isFirstResponder }) { _ = held.resignFirstResponder() }
     }
 
     /// The events beyond press and change (LLP 1005 §3).

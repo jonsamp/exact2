@@ -115,15 +115,18 @@ final class ControlHost: NSObject {
             let on = owner.props["checked"].map { $0 == "true" }
             let accent = owner.channels("accent_color").map { TextEngine.color($0) }
             if let s = control as? UISwitch {
+                // Only what changed: re-setting an unchanged tint restyles the
+                // switch and cuts off its own release animation, the glass
+                // thumb settling back into the knob.
                 if let on, s.isOn != on { s.setOn(on, animated: s.window != nil) }
-                s.onTintColor = accent
+                if s.onTintColor != accent { s.onTintColor = accent }
             } else if let c = control as? ExactCheckbox {
                 if let on { c.isOn = on }
                 c.accent = accent
             } else {
                 configureValue(control, owner, accent: accent)
             }
-            control.isEnabled = !owner.disabled
+            if control.isEnabled == owner.disabled { control.isEnabled = !owner.disabled }
             control.accessibilityLabel = owner.props["accessibilityLabel"]
             control.accessibilityIdentifier = owner.props["testId"]
             let natural = naturalSize(control, owner)
@@ -131,8 +134,8 @@ final class ControlHost: NSObject {
             // A slider's track spans its box, as the web's does; the others
             // keep their own size, centred.
             let width = control is UISlider ? box.width : natural.width
-            control.frame = CGRect(x: box.midX - width / 2, y: box.midY - natural.height / 2,
-                                   width: width, height: natural.height)
+            let frame = CGRect(x: box.midX - width / 2, y: box.midY - natural.height / 2, width: width, height: natural.height)
+            if control.frame != frame { control.frame = frame }
             if reported[owner.id] != natural {
                 reported[owner.id] = natural
                 sizes.append((owner.id, natural))

@@ -34,9 +34,42 @@ private final class RouteController: UIViewController {
     }
 }
 
+/// Where the current navigation controller's view lives: beside the
+/// viewport, never inside it. UIKit lays out the bars of a navigation
+/// controller with a scroll view above it as content, so on iPhone Duo the
+/// vertical bar's items would sit under the status bar and the camera. The
+/// stage goes wherever the viewport goes (the session's view, or a
+/// presentation), mirrors its geometry and places the controller's view where
+/// its node is; a touch on nothing passes through to the viewport.
+final class NavigationStage: UIView {
+    weak var viewport: UIScrollView?
+    weak var anchor: NodeView?
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        return hit === self ? nil : hit
+    }
+
+    override func focusItems(in rect: CGRect) -> [any UIFocusItem] { FocusSearch.items(self, in: rect) }
+
+    func follow() {
+        guard let viewport, let home = viewport.superview, anchor != nil else { return }
+        if superview !== home || home.subviews.firstIndex(of: self) != (home.subviews.firstIndex(of: viewport) ?? 0) + 1 {
+            home.insertSubview(self, aboveSubview: viewport)
+        }
+        if transform != viewport.transform { transform = viewport.transform }
+        if bounds != viewport.bounds { bounds = viewport.bounds }
+        if center != viewport.center { center = viewport.center }
+        guard let anchor, anchor.isDescendant(of: viewport) else { return }
+        let frame = anchor.convert(anchor.bounds, to: viewport)
+        for view in subviews where view.frame != frame { view.frame = frame }
+    }
+}
+
 final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureRecognizerDelegate {
     unowned let presenter: Presenter
     private var primaryNavigation: UINavigationController?
+    let stage = NavigationStage()
     private var presentedNavigations: [UINavigationController] = []
     private var modalNavigation: UINavigationController? { presentedNavigations.last }
     private var navigation: UINavigationController? { modalNavigation ?? primaryNavigation }
@@ -47,6 +80,9 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     private var controllers: [UInt32: RouteController] = [:]
     private var changing = false
     private var pendingSync = false
+    /// The route a finished swipe back popped, until the app's back lands.
+    /// The tree still holds it in between; syncing that would push it again.
+    private var popped: (key: String, at: CFTimeInterval)?
     private var interactiveSource: (node: NodeView, key: String)?
     /// The stack's depth when the interactive pop began, source included.
     private var interactiveDepth = 0
@@ -128,9 +164,17 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         nav.setNavigationBarHidden(true, animated: false)
         nav.delegate = self
         parent.addChild(nav)
-        root.addSubview(nav.view)
-        nav.view.frame = root.bounds
-        nav.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        if let home = presenter.viewport.superview, home === presenter.session?.view {
+            stage.viewport = presenter.viewport
+            stage.anchor = root
+            stage.follow()
+            stage.addSubview(nav.view)
+            stage.follow()
+        } else {
+            root.addSubview(nav.view)
+            nav.view.frame = root.bounds
+            nav.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        }
         nav.didMove(toParent: parent)
         primaryNavigation = nav
         nav.setViewControllers(wanted, animated: false)
@@ -159,11 +203,18 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         syncing = true
         defer { syncing = false; presenter.flushPendingFocus() }
         guard let (root, routes, selected, wanted) = projection(batch) else { return }
+        if let popped {
+            if wanted.contains(where: { $0.key == popped.key }) && CACurrentMediaTime() - popped.at < 1 { return }
+            self.popped = nil
+        }
         let parts = NavigationRules.segments(presentations: routes[...selected].map { $0.props["navigationPresentation"] })
         installPrimary(root: root, wanted: Array(wanted[parts[0]]))
         // Initial content draws before presentation takes over its viewport.
         if parts.count > 1, let session = presenter.session, session.firstDrawMs == nil { return }
-        guard !changing, !presenter.modals.inTransition else { pendingSync = true; return }
+        // A swipe back has changed the stack before willShow marks it changing;
+        // a stack set meanwhile is queued by UIKit and lands after the swipe.
+        let inFlight = ([primaryNavigation] + presentedNavigations).contains { $0?.transitionCoordinator != nil }
+        guard !changing, !inFlight, !presenter.modals.inTransition else { pendingSync = true; return }
         pendingSync = false
         let boundaries = parts.dropFirst().map { wanted[$0.lowerBound].node }
         let mounted = presenter.modals.routes
@@ -200,9 +251,14 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             nav.setNavigationBarHidden(true, animated: false)
             nav.delegate = self
             owner.addChild(nav)
-            root.addSubview(nav.view)
-            nav.view.frame = root.bounds
-            nav.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            if stage.anchor === root {
+                stage.addSubview(nav.view)
+                stage.follow()
+            } else {
+                root.addSubview(nav.view)
+                nav.view.frame = root.bounds
+                nav.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            }
             nav.didMove(toParent: owner)
             presentedNavigations.append(nav)
             nav.setViewControllers(Array(wanted[part]), animated: false)
@@ -215,8 +271,12 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
                                      preceding: preceding, owner: owner)
         }
         if let nav = navigation {
-            nav.view.frame = root.bounds
-            root.bringSubviewToFront(nav.view)
+            if nav.view.superview === stage {
+                stage.follow()
+            } else {
+                nav.view.frame = root.bounds
+                root.bringSubviewToFront(nav.view)
+            }
             nav.view.layoutIfNeeded()
         }
         controllers = controllers.filter { routeIDs.contains($0.key) }
@@ -298,13 +358,16 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     }
 
     func move(to parent: UIViewController, mount: () -> Void) {
-        guard let nav = navigation, nav.parent !== parent else { mount(); return }
+        guard let nav = navigation, nav.parent !== parent else { mount(); stage.follow(); return }
         let container = nav.view.superview
         nav.willMove(toParent: nil)
         nav.view.removeFromSuperview()
         nav.removeFromParent()
         parent.addChild(nav)
         mount()
+        // The stage goes with the viewport before the controller's view
+        // returns to it, so that view is inside its new parent's.
+        stage.follow()
         container?.addSubview(nav.view)
         nav.didMove(toParent: parent)
     }
@@ -427,6 +490,15 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         lastTransition = dispatches ? "completed" : (cancelled ? "cancelled" : "idle")
         interactiveTransition = false
         guard dispatches, let control = backControl else { return }
+        if let key = source?.key {
+            popped = (key, CACurrentMediaTime())
+            // An app that refuses the back keeps the route: show it again.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                guard let self, self.popped?.key == key else { return }
+                self.popped = nil
+                self.sync(Batch(ops: [], timers: false, motion: false, clock: nil, error: nil))
+            }
+        }
         presenter.press(control.id)
     }
 
@@ -438,6 +510,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         primaryNavigation?.view.removeFromSuperview()
         primaryNavigation?.removeFromParent()
         primaryNavigation = nil
+        stage.anchor = nil
         container = nil
         controllers.removeAll()
         routeIDs = []
@@ -445,6 +518,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         pendingSync = false
         interactiveSource = nil
         interactiveTransition = false
+        popped = nil
         lastTransition = "idle"
         if clearFocus { presenter.cancelPendingFocus() }
     }
