@@ -373,7 +373,7 @@ fn a_scroller_the_platform_insets_lays_out_its_content_between_the_insets() {
     // indicator's 34: the filled column ends where the indicator begins
     // once the title's inset moves it down, and keeps its start.
     kernel
-        .set_host_cover(4, Some(HostCover::Inset([140.0, 34.0])))
+        .set_host_cover(4, Some(HostCover::Inset([140.0, 0.0, 34.0, 0.0])))
         .unwrap();
     assert_eq!(
         frame(&mut kernel, 4),
@@ -394,11 +394,34 @@ fn a_scroller_the_platform_insets_lays_out_its_content_between_the_insets() {
 fn scrolling_content_keeps_its_extent_under_an_inset() {
     let mut kernel = scroller(true);
     kernel
-        .set_host_cover(4, Some(HostCover::Inset([140.0, 34.0])))
+        .set_host_cover(4, Some(HostCover::Inset([140.0, 0.0, 34.0, 0.0])))
         .unwrap();
     assert_eq!(frame(&mut kernel, 6), (0.0, 16.0, 390.0, 2000.0));
     assert_eq!(kernel.node(4).unwrap().content.1, 2032.0, "16 + 2000 + 16");
     assert!(kernel
-        .set_host_cover(4, Some(HostCover::Inset([f32::NAN, 0.0])))
+        .set_host_cover(4, Some(HostCover::Inset([f32::NAN, 0.0, 0.0, 0.0])))
         .is_err());
+}
+
+#[test]
+fn a_scroller_the_platform_insets_at_its_sides_lays_out_its_content_between_them() {
+    let mut kernel = scroller(false);
+    // A Duo's strip: UIKit adds its 76 at the right to what scrolls, so the
+    // content is that much narrower and its extent leaves it out.
+    kernel
+        .set_host_cover(4, Some(HostCover::Inset([0.0, 76.0, 34.0, 0.0])))
+        .unwrap();
+    assert_eq!(
+        frame(&mut kernel, 4),
+        (0.0, 0.0, 390.0, 844.0),
+        "the scroller keeps its box"
+    );
+    assert_eq!(frame(&mut kernel, 5), (0.0, 16.0, 314.0, 778.0));
+    assert_eq!(
+        kernel.node(4).unwrap().content.0,
+        314.0,
+        "the extent the platform adds its side insets to"
+    );
+    kernel.set_host_cover(4, None).unwrap();
+    assert_eq!(frame(&mut kernel, 5).2, 390.0, "cleared, as authored");
 }

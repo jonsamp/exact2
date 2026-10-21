@@ -72,6 +72,23 @@ private final class ModalController: UIViewController, UIGestureRecognizerDelega
         #endif
     }
     required init?(coder: NSCoder) { nil }
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        #if os(iOS)
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (c: ModalController, _: UITraitCollection) in c.restyleBars() }
+        #endif
+    }
+    #if os(iOS)
+    /// A sheet's bar after the appearance changes: UIKit gave the bar the
+    /// new style but not the content view under it (the title kept the old
+    /// one, white on a light sheet), so the content takes the sheet's style.
+    func restyleBars() {
+        let style = traitCollection.userInterfaceStyle
+        for nav in children.compactMap({ $0 as? UINavigationController }) {
+            for content in nav.navigationBar.subviews where content.overrideUserInterfaceStyle != style { content.overrideUserInterfaceStyle = style }
+        }
+    }
+    #endif
     #if os(iOS)
     // LLP 1105 D6: UIKit asks a presented controller that covers the screen;
     // it answers the presenter's one resolved style, as the root does.

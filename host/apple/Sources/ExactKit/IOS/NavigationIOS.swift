@@ -211,6 +211,12 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     /// sync ran to its end (one that stopped early, waiting for the first
     /// draw, a transition or a presentation it could not make yet, is owed).
     private var windowless = false, nativeMoved = false, settled = false
+    /// The route UIKit popped and whose Back was dispatched: until the app's
+    /// tree drops it (or a second passes), a sync would push it back in.
+    private var awaitingBack: (key: String, at: CFTimeInterval)?
+    /// `didShow` is applying the sync it owes: UIKit still reports the
+    /// finished transition's coordinator there.
+    private var finishingTransition = false
     /// Syncs asked for, for tests.
     private(set) var syncCalls = 0
     private var interactiveSource: (node: NodeView, key: String)?
@@ -431,6 +437,13 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         syncing = true
         defer { syncing = false; presenter.flushPendingFocus() }
         guard let p = projection(batch) else { settled = true; return }
+        if let waiting = awaitingBack {
+            if p.chosen.last?.key == waiting.key && CACurrentMediaTime() - waiting.at < 1 {
+                pendingSync = true
+                return
+            }
+            awaitingBack = nil
+        }
         let root = p.root, wanted = p.chosen
         let parts = NavigationRules.segments(presentations: p.routes[...p.selected].map { $0.props["navigationPresentation"] })
         reshape(p)
@@ -439,7 +452,11 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         if p.tabs != nil { syncTabs(p) }
         // Initial content draws before presentation takes over its viewport.
         if parts.count > 1, let session = presenter.session, session.firstDrawMs == nil { return }
-        guard !changing, !presenter.modals.inTransition else { pendingSync = true; return }
+        // UIKit's own Back pops before willShow marks the change: a sync in
+        // between would push the departing route back in.
+        guard !changing, !presenter.modals.inTransition,
+              finishingTransition || ([primaryNavigation].compactMap { $0 } + presentedNavigations).allSatisfy({ $0.transitionCoordinator == nil })
+        else { pendingSync = true; return }
         pendingSync = false
         let boundaries = parts.dropFirst().map { wanted[$0.lowerBound].node }
         let mounted = presenter.modals.routes
@@ -542,6 +559,20 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     /// At a cold launch the module loads a turn after first pixel (LLP
     /// 1075.003 Q3 (c)): each hatch runs once for every object already live,
     /// stacks first, in the order they were built.
+    /// A bar item's photo loaded (`BadgeFace.photo`): its stack's routes
+    /// project again, once UIKit's transition, if any, ends.
+    func photoArrived() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let navs = allNavigations
+            if navs.contains(where: { $0.transitionCoordinator != nil }) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.photoArrived() }
+                return
+            }
+            for nav in navs { prepareRoutes(nav.viewControllers.compactMap { $0 as? RouteController }, in: nav) }
+        }
+    }
+
     func replayHatches() {
         guard presenter.session?.natives.hatchesConnected == true else { return }
         replayingHatches = true
@@ -952,7 +983,9 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             // intent. Apply it once the native stack is available again.
             if pendingSync {
                 pendingSync = false
+                finishingTransition = true
                 sync(Batch(ops: [], timers: false, motion: false, clock: nil, error: nil))
+                finishingTransition = false
             }
             presenter.session?.view?.fit()
             presenter.syncModal()
@@ -1019,6 +1052,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         lastTransition = dispatches ? "completed" : (cancelled ? "cancelled" : "idle")
         interactiveTransition = false
         guard dispatches else { return }
+        awaitingBack = (rootKey, CACurrentMediaTime())
         goBack()
     }
 
@@ -1054,6 +1088,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         routeIDs = []
         changing = false
         pendingSync = false
+        awaitingBack = nil
         interactiveSource = nil
         interactiveTransition = false
         keyboardDropped = false

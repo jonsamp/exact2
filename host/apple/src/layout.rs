@@ -436,9 +436,11 @@ pub(super) fn content_size(node: &NodeRef<'_>, kernel: &Kernel) -> (f32, f32) {
     let (_, _, pad_right, pad_bottom) = kernel.resolved_padding(node.key).unwrap_or_default();
     // A scroller UIKit insets: its end padding holds those insets, which
     // UIKit adds back (LLP 1116.000 D1.2), as `node.content` leaves them out.
-    let pad_bottom = match kernel.arena().cover(node.key.index) {
-        Some(exact_kernel::HostCover::Inset([top, bottom])) => pad_bottom - top - bottom,
-        _ => pad_bottom,
+    let (pad_right, pad_bottom) = match kernel.arena().cover(node.key.index) {
+        Some(exact_kernel::HostCover::Inset([top, right, bottom, left])) => {
+            (pad_right - left - right, pad_bottom - top - bottom)
+        }
+        _ => (pad_right, pad_bottom),
     };
     let (mut w, mut h) = node.content;
     for child in node.children() {

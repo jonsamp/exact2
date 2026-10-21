@@ -1017,7 +1017,10 @@ final class MenuHost {
         if let symbol = row.face?.symbol { return UIImage(systemName: symbol) }
         guard !row.isNativeButton, let img = Self.firstImage(in: row) else { return nil }
         if let symbol = img.image, img.imageSource?.hasPrefix("symbol:") == true { return symbol }
-        return img.raster.map { Self.rowImage($0.image.image) }
+        guard let bitmap = img.raster?.image.image else { return nil }
+        let image = Self.rowImage(bitmap)
+        // A tinted image is a glyph: the menu's own colour, as a symbol's.
+        return img.ownColor("tint_color") == nil ? image : image.withRenderingMode(.alwaysTemplate)
     }
     /// A menu row draws an image at its own size: fit it in the row's icon
     /// box, keeping its ratio.

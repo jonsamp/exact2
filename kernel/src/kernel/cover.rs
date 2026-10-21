@@ -37,10 +37,10 @@ pub enum HostCover {
     Edges([f32; 4]),
     /// Replaced by a native control: the box takes no space.
     Whole,
-    /// A scroller the platform insets by these points at its top and bottom
-    /// edges: subtracted from its content box's height for layout, never
-    /// moving the content, and left out of its published extent.
-    Inset([f32; 2]),
+    /// A scroller the platform insets by these points at its top, right,
+    /// bottom and left edges: subtracted from its content box for layout,
+    /// never moving the content, and left out of its published extent.
+    Inset([f32; 4]),
 }
 
 impl Kernel {
@@ -64,7 +64,7 @@ impl Kernel {
             return Err(LayoutError::InvalidIntrinsicSize(view).into());
         }
         let cover =
-            cover.filter(|c| *c != HostCover::Edges([0.0; 4]) && *c != HostCover::Inset([0.0; 2]));
+            cover.filter(|c| *c != HostCover::Edges([0.0; 4]) && *c != HostCover::Inset([0.0; 4]));
         let before = self.arena.cover(slot);
         if before == cover {
             return Ok(());
@@ -109,7 +109,8 @@ pub(crate) fn apply(arena: &NodeArena, slot: u32, s: &mut taffy::style::Style) {
                 left: style.padding_left.floor_lp(env, left),
             };
         }
-        Some(HostCover::Inset([top, bottom])) => {
+        Some(HostCover::Inset([top, right, bottom, left])) => {
+            s.padding.right = style.padding_right.floor_lp(env, left + right);
             s.padding.bottom = style.padding_bottom.floor_lp(env, top + bottom);
         }
         None => {}
@@ -120,7 +121,10 @@ pub(crate) fn apply(arena: &NodeArena, slot: u32, s: &mut taffy::style::Style) {
 /// the insets the platform adds back (`Inset`).
 pub(crate) fn published_extent(arena: &NodeArena, slot: u32, extent: (f32, f32)) -> (f32, f32) {
     match arena.cover(slot) {
-        Some(HostCover::Inset([top, bottom])) => (extent.0, (extent.1 - top - bottom).max(0.0)),
+        Some(HostCover::Inset([top, right, bottom, left])) => (
+            (extent.0 - left - right).max(0.0),
+            (extent.1 - top - bottom).max(0.0),
+        ),
         _ => extent,
     }
 }
@@ -134,6 +138,7 @@ pub(crate) fn inset(arena: &NodeArena, slot: u32) -> bool {
 pub(crate) fn without_inset(arena: &NodeArena, slot: u32, s: &mut taffy::style::Style) {
     if inset(arena, slot) {
         let (style, env) = (arena.style(slot), arena.env());
+        s.padding.right = style.padding_right.floor_lp(env, 0.0);
         s.padding.bottom = style.padding_bottom.floor_lp(env, 0.0);
     }
 }

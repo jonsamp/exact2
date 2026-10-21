@@ -48,8 +48,9 @@ enum HostCover: Equatable {
     case whole
     /// A scroller UIKit insets (a route's collapsing or bottom-edge
     /// scroller): the kernel lays its content out between these insets
-    /// (LLP 1116.000 D1.2).
-    case inset(top: CGFloat, bottom: CGFloat)
+    /// (LLP 1116.000 D1.2), its sides' included: UIKit adds a side's safe
+    /// area (a Duo's strip, a landscape notch) to what scrolls.
+    case inset(top: CGFloat, right: CGFloat = 0, bottom: CGFloat, left: CGFloat = 0)
 }
 
 /// The module's hatch entries (NativeModule.swift reads them from its table).
