@@ -17,6 +17,8 @@ extension NodeView {
     /// ± on the decimal and number pads where `min` is below zero.
     var padKeys: (sign: Bool, done: Bool) {
         guard let f = field else { return (false, false) }
+        // A one-time code submits when it is whole: no Done to add.
+        if f.textContentType == .oneTimeCode { return (false, false) }
         switch f.keyboardType {
         case .decimalPad, .numberPad:
             let sign = props["min"].flatMap { Double($0.trimmingCharacters(in: .whitespaces)) }.map { $0 < 0 } ?? false

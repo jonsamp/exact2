@@ -346,6 +346,51 @@ extension NavigationHost {
         barShows(nav) && bar(of: c.node, pushed: c.pushed) != .hidden
     }
 
+    /// A title's segmented control slides with the push or pop as a title
+    /// does, and fades as a title does: unfaded, UIKit's clip at the bar's
+    /// margin showed as a cut through its capsule while it moved.
+    func fadeTitleSegments(_ nav: UINavigationController) {
+        guard let coordinator = nav.transitionCoordinator else { return }
+        let incoming = (coordinator.viewController(forKey: .to) as? RouteController)?.titleSegments?.control
+        let outgoing = (coordinator.viewController(forKey: .from) as? RouteController)?.titleSegments?.control
+        guard incoming != nil || outgoing != nil else { return }
+        incoming?.alpha = 0
+        coordinator.animate(alongsideTransition: { _ in
+            incoming?.alpha = 1
+            outgoing?.alpha = 0
+        }, completion: { _ in
+            incoming?.alpha = 1
+            outgoing?.alpha = 1
+        })
+    }
+
+    /// The box a route's bar moves sideways with (`data-barfollows="<id>"`).
+    static func barFollows(_ node: NodeView) -> String? {
+        guard let data = node.props["dataset"]?.data(using: .utf8),
+              let dataset = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+              let name = dataset["barfollows"], !name.isEmpty else { return nil }
+        return name
+    }
+
+    /// Each stack's bar draws its items shifted by the `translate` of the box
+    /// its top route names (`barFollows`), in the frame the box moves, so a
+    /// drawer that slides the screen slides UIKit's bar with it. The bar
+    /// keeps its frame, so UIKit lays nothing out again and builds no glass
+    /// items anew; while shifted it takes no touches, which reach the
+    /// screen under it.
+    func followBars() {
+        for nav in [primaryNavigation].compactMap({ $0 }) + Array(tabNavigations.values) {
+            let name = (nav.topViewController as? RouteController).flatMap { Self.barFollows($0.node) }
+            let box = name.flatMap { presenter.chrome.named[$0]?.min() }.flatMap { presenter.views[$0] }
+            let x = box?.translate.x ?? 0
+            let bar = nav.navigationBar
+            let shift = CATransform3DMakeTranslation(x, 0, 0)
+            guard !CATransform3DEqualToTransform(bar.layer.sublayerTransform, shift) else { continue }
+            bar.layer.sublayerTransform = shift
+            bar.isUserInteractionEnabled = x == 0
+        }
+    }
+
     /// Whether the bar is UIKit's for now on a route's account: its header
     /// search is active or being presented or dismissed, and UIKit hides and
     /// shows the bar for it (`hidesNavigationBarDuringPresentation`, §9.6).
@@ -367,6 +412,7 @@ extension NavigationHost {
         guard stacks[ObjectIdentifier(nav)] != nil, !searching(c) else { return }
         let shows = c.map { routeShowsBar($0, in: nav) } ?? barShows(nav)
         if nav.isNavigationBarHidden == shows { nav.setNavigationBarHidden(!shows, animated: animated) }
+        if animated { fadeTitleSegments(nav) }
     }
 
     /// The heading's group as the item's title (§9.10). A subtitle alone is

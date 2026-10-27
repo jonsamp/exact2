@@ -503,6 +503,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         guard loadGeneration == generation, let presenter, presenter.views[id] === self else { return nil }
         raster = lease; AnimatedRasters.shared.attach(self); applyImageLayer()
         self.setNeedsDisplay()
+        if BadgeFace.waiting.remove(id) != nil { presenter.navigation.photoArrived() }
         if let c = canvasAbove { c.needsCapture = true; canvases?.scheduleCapture() }
         return lease.image.naturalSize
     }
@@ -1041,7 +1042,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
             #if os(iOS)
             f.pasteDelegate = FieldSelections.tracks(self) ? self : nil
             #endif
-            f.tintColor = props["emojiPicker"] == "true" ? .clear : nil
+            if props["emojiPicker"] == "true" { f.tintColor = .clear }
             if (set["emojiPicker"] != nil || clear.contains("emojiPicker")), f.isFirstResponder { f.reloadInputViews() }
             if let v = props["value"] { writeValue(v, into: f) }
             applyPlaceholder(f); applyFieldName(f)
@@ -1287,7 +1288,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
     /// there), never less than the box (or the port UIKit's insets leave, `scrollFloor`).
     func fitScroll() {
         guard let sv = scroll else { return }
-        let size = CGSize(width: sv.scrollsX ? max(content.width, sv.bounds.width) : sv.bounds.width, height: sv.scrollsY ? max(content.height, scrollFloor(sv)) : sv.bounds.height)
+        let size = CGSize(width: sv.scrollsX ? max(content.width, scrollFloorWidth(sv)) : scrollFloorWidth(sv), height: sv.scrollsY ? max(content.height, scrollFloor(sv)) : sv.bounds.height)
         if sv.contentSize != size { sv.contentSize = size }
         // Forced bounce on a carousel's computed y traps Mac wheel input; one travels a quarter of its width or lays a
         // row (itself, or a child wider than the port), and a page a few points too wide keeps its bounce.

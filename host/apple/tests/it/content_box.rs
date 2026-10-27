@@ -84,7 +84,7 @@ fn a_box_with_a_percentage_padding_is_sent_its_resolved_content_box() {
     // A scroller UIKit insets under its bars (LLP 1075.003 §3.5) keeps its
     // CSS padding: the platform adds those insets itself
     let list = view(&host, "list");
-    let covered = host.set_covers(&[(list, Some(HostCover::Inset([140.0, 34.0])))]);
+    let covered = host.set_covers(&[(list, Some(HostCover::Inset([140.0, 0.0, 34.0, 0.0])))]);
     assert_eq!(content(&covered, list), None, "cover: {covered}");
     // A box whose content box is its border box (an `env()` inset of 0) sends none
     assert_eq!(content(&first, view(&host, "safe")), None, "env: {first}");

@@ -305,7 +305,7 @@ export const SIMULATOR_PREFIX = 'SIMULATORX';
  * second Keychain group so items stored then still read and update in place
  * (D3, measured). The grants' signing entitlements (`reach.entitlements`,
  * D2) are each `true`. */
-export const entitlements = (app, team = null, debuggable = true, reach = null, { simulator = false, prefix = team } = {}) => {
+export const entitlements = (app, team = null, debuggable = true, reach = null, { simulator = false, prefix = team, aps = null } = {}) => {
   const ios = app.manifest.host?.ios ?? {};
   const prefixed = `${SIMULATOR_PREFIX}.${app.id}`;
   const dict = {
@@ -322,6 +322,8 @@ export const entitlements = (app, team = null, debuggable = true, reach = null, 
   const all = [...new Set([...domains, ...(reach?.auth?.associatedDomains ?? [])])];
   if (all.length) dict['com.apple.developer.associated-domains'] = all;
   for (const name of reach?.entitlements ?? []) dict[name] = true;
+  // Remote notifications: the profile's APNs environment, or the one its kind implies.
+  if (ios.pushNotifications) dict['aps-environment'] = aps ?? (debuggable ? 'development' : 'production');
   return plistFile(dict);
 };
 
@@ -1335,13 +1337,13 @@ async function main(args) {
     const id = host ? `${app.id}.host` : app.id;
     // A grant's signing entitlement needs a profile that allows it, which a
     // team wildcard never does for HealthKit (LLP 1069.008.000 D4).
-    const required = appleReach?.entitlements ?? [];
+    const required = [...(appleReach?.entitlements ?? []), ...(app.manifest.host?.ios?.pushNotifications ? ['aps-environment'] : [])];
     const signingProfile = device && !unsigned ? (host || !allows(prof, required) ? profile(ph?.udid, id, required) : prof) : null;
     const signingIdentity = signingProfile ? identity(signingProfile.team) : sha1;
     const ent = resolve(binDir, host ? 'host-entitlements.plist' : 'entitlements.plist');
     if (signingProfile) copyFileSync(signingProfile.path, resolve(assembled, 'embedded.mobileprovision'));
     // Unsigned, the re-signer's profile decides; ask for no debugger, as a distribution profile grants none.
-    writeFileSync(ent, entitlements({ ...app, id }, signingProfile?.team, signingProfile?.dev ?? !unsigned, appleReach, { prefix: signingProfile?.prefix }));
+    writeFileSync(ent, entitlements({ ...app, id }, signingProfile?.team, signingProfile?.dev ?? !unsigned, appleReach, { prefix: signingProfile?.prefix, aps: signingProfile?.aps }));
     verifyBakeFiles(bakedCompat, bakedPlan, listAssets(assembled, true));
     assertAppleIdentity(app, resolve(assembled, host ? 'ExactHostIOS' : paths.executable), bakedCompat.id);
     const whole = receipt(app, { compatibilityId: bakedCompat.id, build: buildReceipt, composition,

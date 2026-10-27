@@ -249,7 +249,7 @@ function decodeProfile(path) {
   const allowed = /<key>Entitlements<\/key>\s*<dict>([\s\S]*?)<\/dict>/.exec(xml)?.[1] ?? '';
   const entitlements = [...allowed.matchAll(/<key>([^<]+)<\/key>\s*(<false\/>)?/g)].filter((m) => !m[2]).map((m) => m[1]);
   const appId = str('application-identifier');
-  return { path, name: str('Name'), team, appId, prefix: appId?.split('.')[0], devices, dev: /<key>get-task-allow<\/key>\s*<true\/>/.test(xml), expires: new Date(expires ?? 0), entitlements };
+  return { path, name: str('Name'), team, appId, prefix: appId?.split('.')[0], devices, dev: /<key>get-task-allow<\/key>\s*<true\/>/.test(xml), expires: new Date(expires ?? 0), entitlements, aps: str('aps-environment') ?? null };
 }
 
 /** The Apple Development identity (its SHA-1) for a team, from the keychain; EXACT_IDENTITY names one. */

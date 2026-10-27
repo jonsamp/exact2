@@ -52,6 +52,10 @@ struct HeaderShape: Equatable {
         /// (UIKit's tint, the platform default) for a colour the button
         /// only inherits or the compiler implied.
         let tint: [[Double]]?
+        /// A symbol's authored `font-size`, as a symbol standing alone takes
+        /// it (a native button's own, since its image is its face); nil keeps
+        /// the bar's own size.
+        let pointSize: CGFloat?
         init(_ button: NodeView) {
             var symbol: String?, text = "", ink: (NodeView, String)?
             func walk(_ node: NodeView) {
@@ -75,6 +79,8 @@ struct HeaderShape: Equatable {
             badge = button.isNativeButton ? nil : BadgeFace(button)
             menu = button.presenter?.invocation(of: button)?.opensPopover == true
             self.symbol = symbol
+            let points = face != nil ? button.number("font_size") : ink.flatMap { $0.1 == "tint_color" ? $0.0.number("font_size") : nil }
+            pointSize = points.flatMap { $0 > 0 && $0 != PageFacts.defaultRootFontSize ? $0 : nil }
             title = text
             label = button.props["accessibilityLabel"] ?? face?.label
             disabled = button.disabled
@@ -173,10 +179,20 @@ struct BadgeFace: Equatable {
     let text: String, symbol: String?
     let light: [[Double]], dark: [[Double]]
     let corners: [CGSize]
+    /// A photo the box shows (an avatar's `image` from a URL), once it
+    /// has loaded; until then the box's fill alone. Its node waits in
+    /// `waiting`, and its arrival projects the bars again.
+    let photo: CGImage?
+    let photoKey: String
+    /// A face on a glass button: the bar's glass capsule stays around it.
+    var glass = false
+    static var waiting = Set<UInt32>()
     init?(_ button: NodeView) {
         let kids = button.container.subviews.compactMap { $0 as? NodeView }
         guard kids.count == 1, let box = kids.first else { return nil }
-        self.init(box: box)
+        let glass = Materials.glass(button.props["backgroundMaterial"])
+        self.init(box: box, authored: glass)
+        self.glass = glass
     }
     /// The face of a filled box holding a text or a symbol (a title's
     /// avatar, §9.10, too). `authored`: draw it at the size the author gave
@@ -184,16 +200,21 @@ struct BadgeFace: Equatable {
     /// and 44, as a title's avatar is; otherwise at a bar item's 36.
     init?(box: NodeView, authored: Bool = false) {
         guard box.channels("background_color") != nil else { return nil }
-        var text = "", symbol: String?, ink: NodeView?
+        var text = "", symbol: String?, ink: NodeView?, pictured: NodeView?
         func walk(_ node: NodeView) {
             for case let child as NodeView in node.container.subviews {
                 if child.kind == "image", let name = child.props["symbolName"], !name.isEmpty { symbol = symbol ?? name; ink = ink ?? child }
+                else if child.kind == "image", let source = child.imageSource, !source.hasPrefix("symbol:") { pictured = pictured ?? child }
                 else if child.isParagraph, text.isEmpty { text = child.accessibleText; ink = ink ?? child }
                 else { walk(child) }
             }
         }
         walk(box)
-        guard !text.isEmpty || symbol != nil else { return nil }
+        guard !text.isEmpty || symbol != nil || pictured != nil else { return nil }
+        let loaded = pictured?.raster?.image.image
+        if let pictured, loaded == nil { Self.waiting.insert(pictured.id) }
+        photo = loaded
+        photoKey = pictured.map { "\($0.imageSource ?? "")|\(loaded != nil)" } ?? ""
         let key = symbol == nil ? "text_color" : "tint_color"
         func colours(_ dark: Bool) -> [[Double]] {
             [box.channels("background_color", dark: dark) ?? [0, 0, 0, 0], ink?.channels(key, dark: dark) ?? (dark ? [1, 1, 1, 1] : [0, 0, 0, 1])]
@@ -211,21 +232,28 @@ struct BadgeFace: Equatable {
     // every batch builds each route's source.
     var source: String {
         let rgba = { (c: [[Double]]) in c.map { $0.map { String($0) }.joined(separator: ",") }.joined(separator: ";") }
-        return "\(text)|\(symbol ?? "")|\(rgba(light))|\(rgba(dark))|\(corners.map { "\($0.width)x\($0.height)" }.joined(separator: ","))|\(size)"
+        return "\(text)|\(symbol ?? "")|\(rgba(light))|\(rgba(dark))|\(corners.map { "\($0.width)x\($0.height)" }.joined(separator: ","))|\(size)|\(photoKey)|\(glass)"
     }
 
     var image: UIImage {
-        let light = draw(self.light).withRenderingMode(.alwaysOriginal)
-        light.imageAsset?.register(draw(self.dark).withRenderingMode(.alwaysOriginal), with: UITraitCollection(userInterfaceStyle: .dark))
+        let light = draw(self.light).withRenderingMode(.alwaysOriginal), dark = draw(self.dark).withRenderingMode(.alwaysOriginal)
+        // The dark face at its own scale: registered with the style alone,
+        // UIKit sized it at 1x, three times the light face's width.
+        light.imageAsset?.register(dark, with: UITraitCollection(traitsFrom: [UITraitCollection(displayScale: dark.scale), UITraitCollection(userInterfaceStyle: .dark)]))
         return light
     }
     private func draw(_ c: [[Double]]) -> UIImage {
         let rect = CGRect(x: 0, y: 0, width: size, height: size)
         return UIGraphicsImageRenderer(size: rect.size).image { _ in
             TextEngine.color(c[0]).setFill()
-            UIBezierPath(cgPath: BorderPaint.roundedRect(rect, corners, shape: nil)).fill()
+            let outline = UIBezierPath(cgPath: BorderPaint.roundedRect(rect, corners, shape: nil))
+            outline.fill()
             let ink = TextEngine.color(c[1])
-            if let symbol, let glyph = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: size * 0.42))?.withTintColor(ink, renderingMode: .alwaysOriginal) {
+            if let photo {
+                let w = CGFloat(photo.width), h = CGFloat(photo.height), scale = max(rect.width / w, rect.height / h)
+                outline.addClip()
+                UIImage(cgImage: photo).draw(in: CGRect(x: (rect.width - w * scale) / 2, y: (rect.height - h * scale) / 2, width: w * scale, height: h * scale))
+            } else if let symbol, let glyph = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: size * 0.42))?.withTintColor(ink, renderingMode: .alwaysOriginal) {
                 glyph.draw(at: CGPoint(x: (rect.width - glyph.size.width) / 2, y: (rect.height - glyph.size.height) / 2))
             } else {
                 let attrs: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: size * 0.42, weight: .medium), .foregroundColor: ink]
@@ -356,6 +384,11 @@ final class TitleSegments: NSObject {
         press = SegmentPress(host: host)
         super.init()
         control.addTarget(press, action: #selector(SegmentPress.changed(_:)), for: .valueChanged)
+        // Inside the bar: UIKit makes a title's segmented control 48 points,
+        // 2 above the bar, and clips that off while a push or pop slides it
+        // (a bare UIKit app too). A required height keeps it within.
+        control.translatesAutoresizingMaskIntoConstraints = false
+        control.heightAnchor.constraint(equalToConstant: 40).isActive = true
         // Sized again when text size or weight changes, no batch needed.
         MainActor.assumeIsolated {
             control.registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitLegibilityWeight.self]) { [weak self] (_: UISegmentedControl, _: UITraitCollection) in
@@ -554,6 +587,7 @@ extension NavigationHost {
                 project(shape, into: c, canGoBack: canGoBack, shows: shows)
             }
             collapse(c, shape: shape, shows: shows, scroller: scroller)
+            topEdge(c, shows: shows, scroller: scroller)
             reachBottom(c)
             c.paintBackdrop()
             searchField(shows ? shape?.search : nil, in: c)
@@ -571,7 +605,7 @@ extension NavigationHost {
         // A route's header shown or hidden in place; a push or pop sets the
         // bar in `willShow` instead, with UIKit's transition.
         if nav.transitionCoordinator == nil, let top = nav.topViewController as? RouteController, routes.contains(top) {
-            showBar(nav, animated: nav.view.window != nil)
+            showBar(nav, animated: nav.view.window != nil && nav.viewControllers.count > 1)
         }
     }
 
@@ -679,6 +713,16 @@ extension NavigationHost {
         control.segmentUnavailable = tabs.map { $0.disabled || $0.ariaUnavailable }
         for (index, tab) in tabs.enumerated() { control.setEnabled(!tab.disabled, forSegmentAt: index) }
         segments.fit(titles)
+        // The tablist's authored `min-width`: room around short titles.
+        // Room around short titles: each segment its own title's width, in
+        // the font the control draws its selected title in, and 12 points
+        // either side.
+        let font = control.titleTextAttributes(for: .selected)?[.font] as? UIFont ?? .systemFont(ofSize: 13, weight: .semibold)
+        let widths = titles.map { ceil(($0 as NSString).size(withAttributes: [.font: font]).width) + 24 }
+        if widths.indices.contains(where: { $0 < control.numberOfSegments && control.widthForSegment(at: $0) != widths[$0] }) {
+            for (i, width) in widths.enumerated() where i < control.numberOfSegments { control.setWidth(width, forSegmentAt: i) }
+            control.sizeToFit()
+        }
         if c.navigationItem.titleView !== control { c.navigationItem.titleView = control }
     }
 
@@ -826,6 +870,18 @@ extension NavigationHost {
         }
     }
 
+    /// A scroller the route names (`navigationScroll`) that is not at its
+    /// top, under its own padding: the bar's top edge effect follows it, as
+    /// a hand-built screen hands its scroll view to the bar, while its
+    /// insets stay the author's.
+    private func topEdge(_ c: RouteController, shows: Bool, scroller: NodeView?) {
+        guard c.collapseScroll == nil else { return }
+        let named = !(c.node.props["navigationScroll"] ?? "").isEmpty
+        let shown = shows && named ? shownScroll(scroller) : nil
+        guard c.contentScrollView(for: .top) !== shown else { return }
+        c.setContentScrollView(shown, for: .top)
+    }
+
     /// UIKit moves a large title into the content scroll view it follows and
     /// takes it back only when that one leaves the window: handed another, or
     /// none, while the old one stays (chat-rooms' rooms list, moved below a
@@ -944,7 +1000,9 @@ extension NavigationHost {
         let press = BarPress(i.id, self)
         c.barPresses.append(press)
         let action = #selector(BarPress.press)
-        let image = i.badge?.image ?? i.symbol.flatMap { UIImage(systemName: $0) }
+        let image = i.badge?.image ?? i.symbol.flatMap { name in
+            i.pointSize.map { UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: $0)) } ?? UIImage(systemName: name)
+        }
         let item: UIBarButtonItem
         if i.menu, let button = presenter.views[i.id] {
             // A pull-down: UIKit opens it on tap (`MenuHost.pullDown`).
@@ -969,7 +1027,7 @@ extension NavigationHost {
             if i.prominent { item.style = .prominent }
             // A drawn face is its own shape: no glass capsule around it.
             #if !os(tvOS)
-            if i.badge != nil { item.hidesSharedBackground = true }
+            if let badge = i.badge, !badge.glass { item.hidesSharedBackground = true }
             #endif
         }
         return item
@@ -1110,7 +1168,9 @@ extension NavigationHost {
             for node in [c.collapseScroll, c.edgeScroll].compactMap({ $0 }) where node.scrollView != nil {
                 if settled, c.viewIfLoaded?.window != nil, let safe = node.scrollView?.safeAreaInsets {
                     let top = max(safe.top, node === c.collapseScroll ? node.scrollOrigin : 0)
-                    if top > 0 || safe.bottom > 0 { wanted[node.id] = .inset(top: top, bottom: safe.bottom) }
+                    if top > 0 || safe.bottom > 0 || safe.left > 0 || safe.right > 0 {
+                        wanted[node.id] = .inset(top: top, right: safe.right, bottom: safe.bottom, left: safe.left)
+                    }
                 } else if case .inset? = covers[node.id] { wanted[node.id] = covers[node.id] }
             }
             if settled, c.viewIfLoaded?.window != nil {

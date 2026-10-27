@@ -364,6 +364,10 @@
                 "pattern": "^[A-Za-z][A-Za-z0-9+.-]*$"
               }
             },
+            "pushNotifications": {
+              "description": "Remote notifications: a device build signs with `aps-environment`, from the provisioning profile, which must allow it (a simulator build says `development`). The app's module registers with APNs; the host passes it the device token.",
+              "type": "boolean"
+            },
             "team": {
               "type": "string"
             }

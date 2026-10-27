@@ -212,6 +212,14 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         ]
         #endif
     }
+    /// The APNs device token, or why there is none, for the app's module:
+    /// the module asks with `registerForRemoteNotifications` and listens.
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        NotificationCenter.default.post(name: Notification.Name("ExactRemoteNotificationsToken"), object: deviceToken)
+    }
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        NotificationCenter.default.post(name: Notification.Name("ExactRemoteNotificationsError"), object: error)
+    }
     @objc func focusFirst() { session.moveFocus(backward: false) }
     @objc func focusLast() { session.moveFocus(backward: true) }
     @objc func devMenu() { DevMenu.toggle() }

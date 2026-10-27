@@ -37,10 +37,10 @@ pub enum HostCover {
     Edges([f32; 4]),
     /// Replaced by a native control: the box takes no space.
     Whole,
-    /// A scroller the platform insets by these points at its top and bottom
-    /// edges: subtracted from its content box's height for layout, never
-    /// moving the content, and left out of its published extent.
-    Inset([f32; 2]),
+    /// A scroller the platform insets by these points at its top, right,
+    /// bottom and left edges: subtracted from its content box for layout,
+    /// never moving the content, and left out of its published extent.
+    Inset([f32; 4]),
 }
 
 impl Kernel {
@@ -64,7 +64,7 @@ impl Kernel {
             return Err(LayoutError::InvalidIntrinsicSize(view).into());
         }
         let cover =
-            cover.filter(|c| *c != HostCover::Edges([0.0; 4]) && *c != HostCover::Inset([0.0; 2]));
+            cover.filter(|c| *c != HostCover::Edges([0.0; 4]) && *c != HostCover::Inset([0.0; 4]));
         let before = self.arena.cover(slot);
         if before == cover {
             return Ok(());
@@ -110,7 +110,8 @@ pub(crate) fn apply(arena: &NodeArena, slot: u32, s: &mut taffy::style::Style) {
             };
         }
         Some(HostCover::Inset(_)) => {
-            let [_, _, bottom, _] = added_padding(arena, slot);
+            let [_, right, bottom, _] = added_padding(arena, slot);
+            s.padding.right = style.padding_right.floor_lp(env, right);
             s.padding.bottom = style.padding_bottom.floor_lp(env, bottom);
         }
         None => {}
@@ -124,7 +125,7 @@ pub(crate) fn added_padding(arena: &NodeArena, slot: u32) -> [f32; 4] {
         Some(HostCover::Edges([top, right, bottom, left])) => {
             [top + header_inset(arena, slot, top), right, bottom, left]
         }
-        Some(HostCover::Inset([top, bottom])) => [0.0, 0.0, top + bottom, 0.0],
+        Some(HostCover::Inset([top, right, bottom, left])) => [0.0, left + right, top + bottom, 0.0],
         _ => [0.0; 4],
     }
 }
@@ -133,7 +134,10 @@ pub(crate) fn added_padding(arena: &NodeArena, slot: u32) -> [f32; 4] {
 /// the insets the platform adds back (`Inset`).
 pub(crate) fn published_extent(arena: &NodeArena, slot: u32, extent: (f32, f32)) -> (f32, f32) {
     match arena.cover(slot) {
-        Some(HostCover::Inset([top, bottom])) => (extent.0, (extent.1 - top - bottom).max(0.0)),
+        Some(HostCover::Inset([top, right, bottom, left])) => (
+            (extent.0 - left - right).max(0.0),
+            (extent.1 - top - bottom).max(0.0),
+        ),
         _ => extent,
     }
 }
@@ -147,6 +151,7 @@ pub(crate) fn inset(arena: &NodeArena, slot: u32) -> bool {
 pub(crate) fn without_inset(arena: &NodeArena, slot: u32, s: &mut taffy::style::Style) {
     if inset(arena, slot) {
         let (style, env) = (arena.style(slot), arena.env());
+        s.padding.right = style.padding_right.floor_lp(env, 0.0);
         s.padding.bottom = style.padding_bottom.floor_lp(env, 0.0);
     }
 }

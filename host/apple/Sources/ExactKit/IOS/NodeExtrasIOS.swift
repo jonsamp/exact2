@@ -254,8 +254,14 @@ extension NodeView {
     /// out in (LLP 1116.000 D1.2), so a page shorter than that port does not
     /// scroll by the bar and the home indicator, as a table view's does not.
     func scrollFloor(_ sv: UIScrollView) -> CGFloat {
-        guard case .inset(let top, let bottom)? = presenter?.navigation.covers[id] else { return sv.bounds.height }
+        guard case .inset(let top, _, let bottom, _)? = presenter?.navigation.covers[id] else { return sv.bounds.height }
         return max(0, sv.bounds.height - top - bottom)
+    }
+    /// `scrollFloor` across: the port between UIKit's side insets, so a
+    /// scroller UIKit insets at a side (a Duo's strip) does not pan by it.
+    func scrollFloorWidth(_ sv: UIScrollView) -> CGFloat {
+        guard case .inset(_, let right, _, let left)? = presenter?.navigation.covers[id] else { return sv.bounds.width }
+        return max(0, sv.bounds.width - left - right)
     }
 }
 extension UIColor {

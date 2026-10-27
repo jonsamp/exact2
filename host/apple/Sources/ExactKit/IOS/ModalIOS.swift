@@ -72,6 +72,23 @@ private final class ModalController: UIViewController, UIGestureRecognizerDelega
         #endif
     }
     required init?(coder: NSCoder) { nil }
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        #if os(iOS)
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (c: ModalController, _: UITraitCollection) in c.restyleBars() }
+        #endif
+    }
+    #if os(iOS)
+    /// A sheet's bar after the appearance changes: UIKit gave the bar the
+    /// new style but not the content view under it (the title kept the old
+    /// one, white on a light sheet), so the content takes the sheet's style.
+    func restyleBars() {
+        let style = traitCollection.userInterfaceStyle
+        for nav in children.compactMap({ $0 as? UINavigationController }) {
+            for content in nav.navigationBar.subviews where content.overrideUserInterfaceStyle != style { content.overrideUserInterfaceStyle = style }
+        }
+    }
+    #endif
     #if os(iOS)
     // LLP 1105 D6: UIKit asks a presented controller that covers the screen;
     // it answers the presenter's one resolved style, as the root does.
@@ -159,6 +176,9 @@ private final class Presentation {
     var geometry: [UInt32: (node: NodeView, ops: [BatchOp.Kind: BatchOp])] = [:]
     var presenting = true
     var animated = false
+    /// The screen as it stood when the sheet came up, over the background
+    /// while the sheet holds the viewport (`present`).
+    var still: UIView?
     /// Samples where a zoom lands while the route's nodes are still mapped:
     /// run as a Close destroys the route (`prepare`), so the zoom back starts
     /// from the photo as it is then, zoomed or panned.
@@ -359,6 +379,8 @@ final class ModalHost: NSObject, UIAdaptivePresentationControllerDelegate {
 
     private func releaseBackground(_ layer: Presentation) {
         let background = layer.background
+        layer.still?.removeFromSuperview()
+        layer.still = nil
         layer.backgroundHome?.addSubview(background.view)
         // Its home kept resizing while it was away (framed to the sheet, then
         // the keyboard coming back), and autoresizing would have carried it
@@ -438,8 +460,20 @@ final class ModalHost: NSObject, UIAdaptivePresentationControllerDelegate {
         return true
     }
 
+    /// A picture of the view as it last drew, for a sheet's background
+    /// (`present`). A snapshot view would mirror its source, and the source
+    /// moves into the sheet.
+    static func still(of view: UIView) -> UIView? {
+        guard !view.bounds.isEmpty else { return nil }
+        let format = UIGraphicsImageRendererFormat(for: view.traitCollection)
+        let image = UIGraphicsImageRenderer(bounds: view.bounds, format: format).image { _ in
+            _ = view.drawHierarchy(in: view.bounds, afterScreenUpdates: true)
+        }
+        return UIImageView(image: image)
+    }
+
     func present(_ route: NodeView, navigation: UIViewController, from background: UIViewController,
-                 node: NodeView?, preceding: NodeView?, owner: UIViewController) {
+                 node: NodeView?, preceding: NodeView?, owner: UIViewController, still: UIView? = nil) {
         guard let home = presenter.viewport.superview else { return }
         let layer = Presentation(host: self, route: route, navigation: navigation,
                                  background: background, node: node, home: home, owner: owner)
@@ -448,6 +482,17 @@ final class ModalHost: NSObject, UIAdaptivePresentationControllerDelegate {
         background.view.accessibilityElementsHidden = true
         home.addSubview(background.view)
         background.view.frame = frame
+        // The viewport leaves for the sheet and is laid out at its size, so
+        // the root's own nodes beside the stack (a sidebar, a toolbar) leave
+        // with it. The sheet's background is the screen as it last drew.
+        if let still {
+            still.frame = home.bounds
+            still.isUserInteractionEnabled = false
+            still.accessibilityElementsHidden = true
+            home.addSubview(still)
+            still.setPaintForeground()
+            layer.still = still
+        }
         let controller = layer.controller
         if #available(iOS 18.0, tvOS 18.0, *), layer.kind == "fullscreen", route.props["navigationSource"] != nil {
             let options = UIViewController.Transition.ZoomOptions()

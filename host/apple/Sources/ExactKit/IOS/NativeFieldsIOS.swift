@@ -62,6 +62,10 @@ extension NodeView {
             field.defaultTextAttributes[.kern] = number("letter_spacing")
             field.tintColor = caretColor ?? channels("accent_color").map { TextEngine.color($0) }
             showFocusRing(false)
+        } else {
+            // An authored field's `caret-color` (transparent under a drawn
+            // caret, as a code field's cells draw one).
+            field.tintColor = props["emojiPicker"] == "true" ? .clear : caretColor
         }
         layoutField()
     }

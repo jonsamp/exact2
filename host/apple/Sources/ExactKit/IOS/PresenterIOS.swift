@@ -980,6 +980,7 @@ package final class Presenter {
             }
         }
         flats.flush()
+        navigation.followBars()
         fitDocument()
         paintCanvas()
         let first = root.subviews.first as? NodeView

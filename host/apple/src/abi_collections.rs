@@ -40,7 +40,7 @@ impl<D: DataSource> Bridge<D> {
                     }
                     2 => covers.push((view, Some(exact_kernel::HostCover::Whole))),
                     3 => {
-                        let inset = exact_kernel::HostCover::Inset([edge(8), edge(16)]);
+                        let inset = exact_kernel::HostCover::Inset([edge(8), edge(12), edge(16), edge(20)]);
                         covers.push((view, Some(inset)));
                     }
                     _ => covers.push((view, None)),
